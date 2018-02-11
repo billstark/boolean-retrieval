@@ -21,6 +21,7 @@ parts/
 sdist/
 var/
 wheels/
+nltk_data/
 *.egg-info/
 .installed.cfg
 *.egg
