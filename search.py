@@ -30,3 +30,30 @@ for o, a in opts:
 if dictionary_file == None or postings_file == None or file_of_queries == None or file_of_output == None :
     usage()
     sys.exit(2)
+
+query_file = open(file_of_queries)
+output_file = open(file_of_output, 'w')
+dictionary_file = open(dictionary_file)
+postings_file = open(postings_file)
+
+ps = nltk.stem.PorterStemmer()
+
+dictionary = {}
+total_count = 0
+for line in dictionary_file:
+    total_count = total_count + 1
+    data_array = line.split()
+    dictionary[data_array[0]] = [data_array[1], data_array[2]]
+
+
+def get_posting(word):
+
+
+for line in query_file:
+
+    # TODO: parse query
+    query = line
+
+
+
+
