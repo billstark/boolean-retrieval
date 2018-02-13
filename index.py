@@ -70,6 +70,7 @@ ps = nltk.stem.PorterStemmer()
 
 # the temp list that is used to store [word, doc_id]
 temp_list = []
+all_doc_ids = []
 dictionary_file = open(output_file_dictionary, 'w')
 posting_file = open(output_file_postings, 'w')
 
@@ -87,7 +88,7 @@ for index in range(1, 14818):
                 if [word, index] in temp_list:
                     continue
                 temp_list.append([word, index])
-
+        all_doc_ids.append(index)
         input_file.close()
     except IOError as e:
         continue
@@ -109,10 +110,7 @@ for [word, doc_id] in temp_list:
         continue
     processed_list[word]['posting'].append(doc_id)
 
-# formating posting
-offset = 0
-for word in word_list:
-    posting = processed_list[word]['posting']
+def get_posting_string(posting):
 
     # calculates the skipping
     skip = int(math.sqrt(len(posting)))
@@ -142,15 +140,25 @@ for word in word_list:
 
     # add new line syntex, get length and add offset
     posting_list = posting_list[:len(posting_list) - 1] + "\n"
+    return posting_list
+
+
+# formating posting
+offset = 0
+for word in word_list:
+    posting = processed_list[word]['posting']
+    posting_list = get_posting_string(posting)
     processed_list[word]['offset'] = offset
     offset = offset + len(posting_list)
 
     # writes into posting
     posting_file.write(posting_list)
 
+posting_file.write(get_posting_string(all_doc_ids))
 posting_file.close()
 
 # writes into dictionary
+dictionary_file.write(offset)
 for word in word_list:
     dictionary_file.write(word + " " + str(processed_list[word]['offset']) + " " + str(len(processed_list[word]['posting'])) + "\n")
 
