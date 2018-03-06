@@ -11,6 +11,9 @@ def usage():
 def create_term(token):
     return ps.stem(token).lower()
 
+# Finds the posting from a given offset.
+# returns the posting in the form of [[docId, position], [docId, position], ...]
+# The position here referse to the index of the next element (skip pointers included).
 def parse_postings(offset):
     postings_file.seek(offset)
     postings_string = postings_file.readline()
@@ -19,12 +22,17 @@ def parse_postings(offset):
         postings_string.split())
     return postings
 
+# returns the posting according to a specific word.
+# returns the posting in the form of [[docId, position], [docId, position], ...]
+# The position here referse to the index of the next element (skip pointers included).
 def get_posting(word):
     term = create_term(word)
     if term not in dictionary:
         return []
     return parse_postings(int(dictionary[term][0]))
 
+# Adds skip pointers to a posting with the form [docId, docId, ...]
+# This would be useful when we are dealing with merging.
 def add_skip_pointers(temp_posting):
     skip = int(math.sqrt(len(temp_posting)))
     next_index = 0
@@ -42,6 +50,11 @@ def add_skip_pointers(temp_posting):
         return_posting.append([doc_id, index + 1])
     return return_posting
 
+# Gets the next index of a specified posting list in AND operation.
+# e.g. we are operating on 1, 2, 3, 4 and
+#                          2, 3, 5, 6
+# suppose current index is 0 and the other index is 3, we could move the current
+# index to 2 due to the skip pointer.
 def and_next_index(current_index, the_other_index, current_list, the_other_list):
     if current_index >= len(current_list) - 1:
         return current_index + 1
@@ -52,6 +65,9 @@ def and_next_index(current_index, the_other_index, current_list, the_other_list)
         return next_index
     return current_index + 1
 
+# Given two postings of the form [[docId, pointer], [docId, pointer], ...]
+# returns a posting that is the result of and "AND" operation
+# return format: [[docId, pointer], [docId, pointer], ...]
 def and_postings(posting_one, posting_two):
     index_one = 0
     index_two = 0
@@ -70,6 +86,7 @@ def and_postings(posting_one, posting_two):
         index_two = index_two + 1
     return add_skip_pointers(temp_posting)
 
+# similar to "AND" operation.
 def or_postings(posting_one, posting_two):
     index_one = 0
     index_two = 0
@@ -96,6 +113,7 @@ def or_postings(posting_one, posting_two):
         index_two = index_two + 1
     return add_skip_pointers(temp_posting)
 
+# defines and_not operation
 def and_not_postings(posting_one, posting_two):
     index_one = 0
     index_two = 0
@@ -116,9 +134,16 @@ def and_not_postings(posting_one, posting_two):
         index_two = index_two + 1
     return add_skip_pointers(temp_posting)
 
+# defines not operation
 def not_postings(posting):
     return and_not_postings(all_posting, posting)
 
+# breaks the query according to the "AND", "OR" or "NOT" keyword.
+# input is a string of unparsed query
+# output is an array of breaked subquerys at the same level.
+# Note: This method is intended to solve the following case:
+# query: C OR (A OR B). We perhaps need to break the query to 
+# C and (A OR B) first.
 def break_with_keyword(query, keyword):
     breaked = query.split(" " + keyword + " ")
     parsed = []
@@ -141,35 +166,64 @@ def break_with_keyword(query, keyword):
             continue
     return parsed
 
+# Parses the query.
 def parse_query(query):
-    if query[0] == '(' and query[len(query) - 1] == ')':
+
+    # at first, if it is wrapped with only one bracket, remove it.
+    if query[0] == '(' and query[len(query) - 1] == ')' and query.count('(') == 1 and query.count(')') == 1:
         query = query[1:len(query) - 1]
+
+    # break with "OR" first, since OR is processed at last.
     breaked_or = break_with_keyword(query, "OR")
+
+    # if nothing is breaked, which means that there is no OR operation, then we consider AND
     if len(breaked_or) == 1:
+
+        # break with AND
         breaked_and = break_with_keyword(query, "AND")
+
+        # NOTE: there is a flag, it: [[0 or 1, posting], [0 or 1, posting], ...]
+        # when the flag is set to 1, remember to toggle the posting when doing the 
+        # outer AND (I am using the flag because if the original posting is very large, 
+        # we can toggle it first and do NOT first, otherwise we should do "AND NOT")
         term_postings = []
+
+        # for each keyword in the breaked and
         for keyword in breaked_and:
-            if "NOT" in keyword:
+
+            # if there is not and not is not included in the bracket, parse it as NOT something.
+            if "NOT" in keyword and not (keyword[0] == '(' and keyword[len(keyword) - 1] == ')'):
                 keyword = keyword[4:]
                 posting = parse_query(keyword)
                 if len(posting) < len(all_posting) - len(posting):
                     term_postings.append([1, posting])
                     continue
                 term_postings.append([0, not_postings(posting)])
+                continue
+
+            # if there is bracket, pass it to parse query.
+            if " " in keyword:
+                term_postings.append([0, parse_query(keyword)])
+                continue
+
+            # else, there is only single-word left. get the posting of it
             posting = get_posting(keyword)
             if len(posting) == 0:
                 return []
             term_postings.append([0, posting])
 
+        # sort all postings by length first
         term_postings.sort(key = lambda x: len(x[1]))
         
         result_and_postings = []
 
+        # check the first posting (see whether we need to toggle)
         if term_postings[0][0] == 1:
             result_and_postings = not_postings(term_postings[0][1])
         else:
             result_and_postings = term_postings[0][1]
 
+        # then operate AND on all the sub querys.
         for index in range(1, len(term_postings)):
             if term_postings[index][0] == 1:
                 result_and_postings = and_not_postings(result_and_postings, term_postings[index][1])
@@ -177,6 +231,8 @@ def parse_query(query):
             result_and_postings = and_postings(result_and_postings, term_postings[index][1])
         return result_and_postings
 
+    # else, which means that there are more than one sub queries for OR
+    # we process it one by one.
     result_or_posting = []
     for grouped_terms in breaked_or:
         result_or_posting = or_postings(result_or_posting, parse_query(grouped_terms))
@@ -224,18 +280,14 @@ for line in dictionary_file:
         continue
     dictionary[data_array[0]] = [data_array[1], data_array[2]]
 
+for line in query_file:
+    if "\n" in line:
+        line = line[0:len(line) - 1]
+    temp_result = parse_query(line)
+    temp_result = map(lambda item: str(item[0]), temp_result)
 
-# for line in query_file:
-
-#     # TODO: parse query
-#     query = line
-
-# print and_postings(get_posting("Nicaragua"), get_posting("Representatives"))
-# print and_postings(get_posting("Nicaragua"), get_posting("Nicaragua"))
-# print or_postings(get_posting("Dauster"), get_posting("Dauster"))
-print len(parse_query("bill OR Gates AND (vista OR XP) AND NOT mac"))
-print len(or_postings(get_posting("bill"), and_postings(or_postings(get_posting("vista"), get_posting("XP")), and_postings(get_posting("Gates"), not_postings(get_posting("mac"))))))
-# print or_postings(get_posting("Dauster"), get_posting("Nicaragua"))
-# print len(all_posting)
-# print len(not_postings(get_posting("Dauster")))
-# print all_posting
+    if (len(temp_result) == 0):
+        output_file.write("\n")
+        continue
+    result_string = " ".join(temp_result)
+    output_file.write(result_string + "\n")

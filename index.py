@@ -75,7 +75,7 @@ dictionary_file = open(output_file_dictionary, 'w')
 posting_file = open(output_file_postings, 'w')
 
 # for each file, try to read it
-for index in range(1, 14818):
+for index in range(1, 14819):
     input_file_name = input_directory + str(index)
     print "trying to index file " + str(index) + "\n"
     try:
