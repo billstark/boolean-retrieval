@@ -71,11 +71,12 @@ ps = nltk.stem.PorterStemmer()
 
 # the temp list that is used to store [word, doc_id]
 temp_list = set()
+all_doc_ids = []
 dictionary_file = open(output_file_dictionary, 'w')
 posting_file = open(output_file_postings, 'w')
 
 # for each file, try to read it
-for index in range(1, 2):
+for index in range(1, 14819):
     input_file_name = input_directory + str(index)
     print "trying to index file " + str(index) + "\n"
     try:
@@ -89,7 +90,7 @@ for index in range(1, 2):
             words = map(lambda word: ps.stem(word).lower(), words)
             for word in words:
                 temp_list.add((word, index))
-
+        all_doc_ids.append(index)
         input_file.close()
     except IOError as e:
         continue
