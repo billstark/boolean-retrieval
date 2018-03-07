@@ -15,7 +15,7 @@ def create_term(token):
 
 
 # Finds the posting from a given offset.
-# returns the posting in the form of [[docId, position], [docId, position], ...]
+# returns the posting in the form of [[doc_id, position], [doc_id, position], ...]
 # The position here refers to the index of the next element (skip pointers included).
 def parse_postings(offset):
     postings_file.seek(offset)
@@ -27,7 +27,7 @@ def parse_postings(offset):
 
 
 # returns the posting according to a specific word.
-# returns the posting in the form of [[docId, position], [docId, position], ...]
+# returns the posting in the form of [[doc_id, position], [doc_id, position], ...]
 # The position here refers to the index of the next element (skip pointers included).
 def get_posting(word):
     term = create_term(word)
@@ -36,7 +36,7 @@ def get_posting(word):
     return parse_postings(int(dictionary[term][0]))
 
 
-# Adds skip pointers to a posting with the form [docId, docId, ...]
+# Adds skip pointers to a posting with the form [doc_id, doc_id, ...]
 # This would be useful when we are dealing with merging.
 def add_skip_pointers(temp_posting):
     skip = int(math.sqrt(len(temp_posting)))
@@ -47,12 +47,11 @@ def add_skip_pointers(temp_posting):
         if index == next_index:
             if index + skip >= len(temp_posting):
                 return_posting.append([doc_id, len(temp_posting) - 1])
-                continue
-
-            next_index = next_index + skip
-            return_posting.append([doc_id, next_index])
-            continue
-        return_posting.append([doc_id, index + 1])
+            else:
+                next_index = next_index + skip
+                return_posting.append([doc_id, next_index])
+        else:
+            return_posting.append([doc_id, index + 1])
     return return_posting
 
 
@@ -72,76 +71,65 @@ def and_next_index(current_index, the_other_index, current_list, the_other_list)
     return current_index + 1
 
 
-# Given two postings of the form [[docId, pointer], [docId, pointer], ...]
+# Given two postings of the form [[doc_id, pointer], [doc_id, pointer], ...]
 # returns a posting that is the result of and "AND" operation
-# return format: [[docId, pointer], [docId, pointer], ...]
+# return format: [[doc_id, pointer], [doc_id, pointer], ...]
 def and_postings(posting_one, posting_two):
     index_one = 0
     index_two = 0
-    temp_posting = []
+    results = []
     while index_one < len(posting_one) and index_two < len(posting_two):
         if posting_one[index_one][0] < posting_two[index_two][0]:
             index_one = and_next_index(index_one, index_two, posting_one, posting_two)
-            continue
-
-        if posting_two[index_two][0] < posting_one[index_one][0]:
+        elif posting_two[index_two][0] < posting_one[index_one][0]:
             index_two = and_next_index(index_two, index_one, posting_two, posting_one)
-            continue
-
-        temp_posting.append(posting_one[index_one][0])
-        index_one = index_one + 1
-        index_two = index_two + 1
-    return add_skip_pointers(temp_posting)
+        else:
+            results.append(posting_one[index_one][0])
+            index_one = index_one + 1
+            index_two = index_two + 1
+    return add_skip_pointers(results)
 
 
 # similar to "AND" operation.
 def or_postings(posting_one, posting_two):
     index_one = 0
     index_two = 0
-    temp_posting = []
+    results = []
     while index_one < len(posting_one) or index_two < len(posting_two):
         if index_one >= len(posting_one):
-            temp_posting.append(posting_two[index_two][0])
-            index_two = index_two + 1
-            continue
-        if index_two >= len(posting_two):
-            temp_posting.append(posting_one[index_one][0])
-            index_one = index_one + 1
-            continue
-        if posting_one[index_one][0] < posting_two[index_two][0]:
-            temp_posting.append(posting_one[index_one][0])
-            index_one = index_one + 1
-            continue
-        if posting_two[index_two][0] < posting_one[index_one][0]:
-            temp_posting.append(posting_two[index_two][0])
-            index_two = index_two + 1
-            continue
-        temp_posting.append(posting_one[index_one][0])
-        index_one = index_one + 1
-        index_two = index_two + 1
-    return add_skip_pointers(temp_posting)
+            results.append(posting_two[index_two][0])
+            index_two += 1
+        elif index_two >= len(posting_two):
+            results.append(posting_one[index_one][0])
+            index_one += 1
+        elif posting_one[index_one][0] < posting_two[index_two][0]:
+            results.append(posting_one[index_one][0])
+            index_one += 1
+        elif posting_two[index_two][0] < posting_one[index_one][0]:
+            results.append(posting_two[index_two][0])
+            index_two += 1
+        else:
+            results.append(posting_one[index_one][0])
+            index_one += 1
+            index_two += 1
+    return add_skip_pointers(results)
 
 
 # defines and_not operation
 def and_not_postings(posting_one, posting_two):
     index_one = 0
     index_two = 0
-    temp_posting = []
+    results = []
     while index_one < len(posting_one):
-        if index_two >= len(posting_two):
-            temp_posting.append(posting_one[index_one][0])
-            index_one = index_one + 1
-            continue
-        if posting_one[index_one][0] < posting_two[index_two][0]:
-            temp_posting.append(posting_one[index_one][0])
-            index_one = index_one + 1
-            continue
-        if posting_two[index_two][0] < posting_one[index_one][0]:
-            index_two = index_two + 1
-            continue
-        index_one = index_one + 1
-        index_two = index_two + 1
-    return add_skip_pointers(temp_posting)
+        if index_two >= len(posting_two) or posting_one[index_one][0] < posting_two[index_two][0]:
+            results.append(posting_one[index_one][0])
+            index_one += 1
+        elif posting_two[index_two][0] < posting_one[index_one][0]:
+            index_two += 1
+        else:
+            index_one += 1
+            index_two += 1
+    return add_skip_pointers(results)
 
 
 # defines not operation
