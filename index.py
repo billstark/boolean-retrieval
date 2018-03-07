@@ -69,7 +69,7 @@ if input_directory == None or output_file_postings == None or output_file_dictio
 ps = nltk.stem.PorterStemmer()
 
 # the temp list that is used to store [word, doc_id]
-temp_list = []
+temp_list = set()
 dictionary_file = open(output_file_dictionary, 'w')
 posting_file = open(output_file_postings, 'w')
 
@@ -84,17 +84,15 @@ for index in range(1, 14818):
         for sentence in nltk.sent_tokenize(input_file_content):
             words = map(lambda word: ps.stem(word).lower(), nltk.word_tokenize(sentence))
             for word in words:
-                if [word, index] in temp_list:
-                    continue
-                temp_list.append([word, index])
+                temp_list.add((word, index))
 
         input_file.close()
     except IOError as e:
         continue
 
 # sorts the temp dictionary
-temp_list.sort(key = lambda doc: doc[1])
-temp_list.sort(key = lambda doc: doc[0])
+temp_list = sorted(temp_list, key = lambda doc: doc[1])
+temp_list = sorted(temp_list, key = lambda doc: doc[0])
 
 # create a dictionary and a word list to keep sequence
 processed_list = {}
