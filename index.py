@@ -157,10 +157,12 @@ for word in word_list:
     # writes into posting
     posting_file.write(posting_list)
 
+# This is to add all postings (a posting of all exisiting doc ids)
 posting_file.write(get_posting_string(all_doc_ids))
 posting_file.close()
 
 # writes into dictionary
+# add this offset for the last posting (all postings)
 dictionary_file.write(str(offset) + "\n")
 for word in word_list:
     dictionary_file.write(word + " " + str(processed_list[word]['offset']) + " " + str(len(processed_list[word]['posting'])) + "\n")
