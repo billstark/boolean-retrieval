@@ -112,9 +112,7 @@ for [word, doc_id] in temp_list:
     processed_list[word]['posting'].append(doc_id)
 
 # formating posting
-offset = 0
-for word in word_list:
-    posting = processed_list[word]['posting']
+def get_posting_string(posting):
 
     # calculates the skipping
     skip = int(math.sqrt(len(posting)))
@@ -144,12 +142,21 @@ for word in word_list:
 
     # add new line syntex, get length and add offset
     posting_list = posting_list[:len(posting_list) - 1] + "\n"
+    return posting_list
+
+
+# formating posting
+offset = 0
+for word in word_list:
+    posting = processed_list[word]['posting']
+    posting_list = get_posting_string(posting)
     processed_list[word]['offset'] = offset
     offset = offset + len(posting_list)
 
     # writes into posting
     posting_file.write(posting_list)
 
+posting_file.write(get_posting_string(all_doc_ids))
 posting_file.close()
 
 # writes into dictionary
