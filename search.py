@@ -5,31 +5,36 @@ import math
 import sys
 import getopt
 
+
 def usage():
     print "usage: " + sys.argv[0] + " -d dictionary-file -p postings-file -q file-of-queries -o output-file-of-results"
+
 
 def create_term(token):
     return ps.stem(token).lower()
 
+
 # Finds the posting from a given offset.
 # returns the posting in the form of [[docId, position], [docId, position], ...]
-# The position here referse to the index of the next element (skip pointers included).
+# The position here refers to the index of the next element (skip pointers included).
 def parse_postings(offset):
     postings_file.seek(offset)
     postings_string = postings_file.readline()
-    postings = map(lambda item: 
-        map(lambda num_string: int(num_string), item.split(":")), 
-        postings_string.split())
+    postings = map(lambda item:
+                   map(lambda num_string: int(num_string), item.split(":")),
+                   postings_string.split())
     return postings
+
 
 # returns the posting according to a specific word.
 # returns the posting in the form of [[docId, position], [docId, position], ...]
-# The position here referse to the index of the next element (skip pointers included).
+# The position here refers to the index of the next element (skip pointers included).
 def get_posting(word):
     term = create_term(word)
     if term not in dictionary:
         return []
     return parse_postings(int(dictionary[term][0]))
+
 
 # Adds skip pointers to a posting with the form [docId, docId, ...]
 # This would be useful when we are dealing with merging.
@@ -50,6 +55,7 @@ def add_skip_pointers(temp_posting):
         return_posting.append([doc_id, index + 1])
     return return_posting
 
+
 # Gets the next index of a specified posting list in AND operation.
 # e.g. we are operating on 1, 2, 3, 4 and
 #                          2, 3, 5, 6
@@ -65,6 +71,7 @@ def and_next_index(current_index, the_other_index, current_list, the_other_list)
         return next_index
     return current_index + 1
 
+
 # Given two postings of the form [[docId, pointer], [docId, pointer], ...]
 # returns a posting that is the result of and "AND" operation
 # return format: [[docId, pointer], [docId, pointer], ...]
@@ -72,7 +79,7 @@ def and_postings(posting_one, posting_two):
     index_one = 0
     index_two = 0
     temp_posting = []
-    while (index_one < len(posting_one) and index_two < len(posting_two)):
+    while index_one < len(posting_one) and index_two < len(posting_two):
         if posting_one[index_one][0] < posting_two[index_two][0]:
             index_one = and_next_index(index_one, index_two, posting_one, posting_two)
             continue
@@ -86,12 +93,13 @@ def and_postings(posting_one, posting_two):
         index_two = index_two + 1
     return add_skip_pointers(temp_posting)
 
+
 # similar to "AND" operation.
 def or_postings(posting_one, posting_two):
     index_one = 0
     index_two = 0
     temp_posting = []
-    while (index_one < len(posting_one) or index_two < len(posting_two)):
+    while index_one < len(posting_one) or index_two < len(posting_two):
         if index_one >= len(posting_one):
             temp_posting.append(posting_two[index_two][0])
             index_two = index_two + 1
@@ -113,12 +121,13 @@ def or_postings(posting_one, posting_two):
         index_two = index_two + 1
     return add_skip_pointers(temp_posting)
 
+
 # defines and_not operation
 def and_not_postings(posting_one, posting_two):
     index_one = 0
     index_two = 0
     temp_posting = []
-    while (index_one < len(posting_one)):
+    while index_one < len(posting_one):
         if index_two >= len(posting_two):
             temp_posting.append(posting_one[index_one][0])
             index_one = index_one + 1
@@ -134,9 +143,11 @@ def and_not_postings(posting_one, posting_two):
         index_two = index_two + 1
     return add_skip_pointers(temp_posting)
 
+
 # defines not operation
 def not_postings(posting):
     return and_not_postings(all_posting, posting)
+
 
 # breaks the query according to the "AND", "OR" or "NOT" keyword.
 # input is a string of unparsed query
@@ -166,9 +177,9 @@ def break_with_keyword(query, keyword):
             continue
     return parsed
 
+
 # Parses the query.
 def parse_query(query):
-
     # at first, if it is wrapped with only one bracket, remove it.
     if query[0] == '(' and query[len(query) - 1] == ')' and query.count('(') == 1 and query.count(')') == 1:
         query = query[1:len(query) - 1]
@@ -213,8 +224,8 @@ def parse_query(query):
             term_postings.append([0, posting])
 
         # sort all postings by length first
-        term_postings.sort(key = lambda x: len(x[1]))
-        
+        term_postings.sort(key=lambda x: len(x[1]))
+
         result_and_postings = []
 
         # check the first posting (see whether we need to toggle)
@@ -239,8 +250,9 @@ def parse_query(query):
 
     return result_or_posting
 
+
 dictionary_file = postings_file = file_of_queries = output_file_of_results = None
-	
+
 try:
     opts, args = getopt.getopt(sys.argv[1:], 'd:p:q:o:')
 except getopt.GetoptError, err:
@@ -249,7 +261,7 @@ except getopt.GetoptError, err:
 
 for o, a in opts:
     if o == '-d':
-        dictionary_file  = a
+        dictionary_file = a
     elif o == '-p':
         postings_file = a
     elif o == '-q':
@@ -259,7 +271,7 @@ for o, a in opts:
     else:
         assert False, "unhandled option"
 
-if dictionary_file == None or postings_file == None or file_of_queries == None or file_of_output == None :
+if dictionary_file is None or postings_file is None or file_of_queries is None or file_of_output is None:
     usage()
     sys.exit(2)
 
@@ -286,7 +298,7 @@ for line in query_file:
     temp_result = parse_query(line)
     temp_result = map(lambda item: str(item[0]), temp_result)
 
-    if (len(temp_result) == 0):
+    if len(temp_result) == 0:
         output_file.write("\n")
         continue
     result_string = " ".join(temp_result)
