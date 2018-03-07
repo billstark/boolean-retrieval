@@ -5,6 +5,8 @@ import math
 import sys
 import getopt
 
+from config import *
+
 
 def usage():
     print "usage: " + sys.argv[0] + " -d dictionary-file -p postings-file -q file-of-queries -o output-file-of-results"
@@ -166,8 +168,71 @@ def break_with_keyword(query, keyword):
     return parsed
 
 
+# Pop a stack until predicate is True, returning all popped items including the one that
+# matched True
+def pop_until(stack, predicate):
+    try:
+        next_item = stack.pop()
+    except IndexError:
+        return []
+
+    popped = [next_item]
+    while not predicate(next_item):
+        try:
+            next_item = stack.pop()
+        except IndexError:
+            return popped
+
+        popped.append(next_item)
+    return popped
+
+
 # Parses the query.
+def tokenize_query(query):
+    # Remove invalid chars
+    query = re.sub(INVALID_QUERY_CHARS, ' ', query)
+    # Add a whitespace around each ( and ) chars to aid tokenization
+    query = re.sub(r'([()])', r' \1 ', query)
+    # Trim whitespace
+    query = query.strip()
+
+    return re.split(r'\s+', query)
+
+
 def parse_query(query):
+    tokens = tokenize_query(query)
+    tokens.reverse()
+
+    # Shunting-yard algorithm https://en.wikipedia.org/wiki/Shunting-yard_algorithm
+    stack = []
+    output = []
+
+    while tokens:
+        token = tokens.pop()
+        if token not in OPERATORS:
+            output.append(token)
+        elif token == '(':
+            stack.append(token)
+        elif token == ')':
+            # Slice [:-1] to drop the matching parenthesis
+            output.extend(pop_until(stack, lambda t: t == '(')[:-1])
+        else:
+            precedence = OPERATORS[token]
+            output.extend(pop_until(stack, lambda t: t == '(' or OPERATORS[t] <= precedence))
+
+            # Handle '(' being accidentally popped out of output
+            if output[-1] == '(':
+                stack.append(output.pop())
+
+            stack.append(token)
+        print(token, output, stack)
+
+    output.extend(reversed(stack))
+
+    return output
+
+
+def run_query(query):
     # at first, if it is wrapped with only one bracket, remove it.
     if query[0] == '(' and query[len(query) - 1] == ')' and query.count('(') == 1 and query.count(')') == 1:
         query = query[1:len(query) - 1]
