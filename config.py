@@ -1,6 +1,6 @@
 import re
 
-INVALID_CHARS = re.compile(r'[^\w\d\s]+')
+INVALID_CHARS = re.compile(r'[^\w\d\s\-]+')
 INVALID_QUERY_CHARS = re.compile(r'[^\w\d\s()]+')
 OPERATORS = {
     'OR': 1,

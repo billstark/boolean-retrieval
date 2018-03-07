@@ -4,6 +4,7 @@ import nltk
 import sys
 import getopt
 import math
+from config import *
 
 def usage():
     print "usage: " + sys.argv[0] + " -i directory-of-documents -d dictionary-file -p postings-file"
@@ -74,7 +75,7 @@ dictionary_file = open(output_file_dictionary, 'w')
 posting_file = open(output_file_postings, 'w')
 
 # for each file, try to read it
-for index in range(1, 14818):
+for index in range(1, 2):
     input_file_name = input_directory + str(index)
     print "trying to index file " + str(index) + "\n"
     try:
@@ -82,7 +83,10 @@ for index in range(1, 14818):
         input_file_content = input_file.read()
 
         for sentence in nltk.sent_tokenize(input_file_content):
-            words = map(lambda word: ps.stem(word).lower(), nltk.word_tokenize(sentence))
+            words = nltk.word_tokenize(sentence)
+            words = map(lambda word: re.sub(INVALID_CHARS, "", word), words)
+            words = filter(lambda word: word != "", words)
+            words = map(lambda word: ps.stem(word).lower(), words)
             for word in words:
                 temp_list.add((word, index))
 
