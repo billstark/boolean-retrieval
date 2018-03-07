@@ -153,6 +153,7 @@ for word in word_list:
 posting_file.close()
 
 # writes into dictionary
+dictionary_file.write(str(offset) + "\n")
 for word in word_list:
     dictionary_file.write(word + " " + str(processed_list[word]['offset']) + " " + str(len(processed_list[word]['posting'])) + "\n")
 
