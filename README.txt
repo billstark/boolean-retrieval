@@ -1,6 +1,8 @@
 This is the README file for A0135817B and A0147995H's submission
 
 Email address:
+Zhang Yijiang: e0011848@u.nus.edu
+Yang Zhuohan: e0012667@u.nus.edu
 
 == Python Version ==
 
