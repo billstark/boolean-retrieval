@@ -10,11 +10,13 @@ We're using Python Version 2.7.14 for this assignment.
 
 == General Notes about this assignment ==
 
-For indexing, the
+Indexing:
 
 == Files included with this submission ==
 
-config.py - includes
+config.py - includes regex, enums and some constants that will be used in index.py and search.py.
+index.py  - indexing program that will be run to index all the training files.
+search.py - searching program that will be used to execute querys in a specific file and give output.
 
 == Statement of individual work ==
 
