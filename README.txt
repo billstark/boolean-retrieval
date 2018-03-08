@@ -1,8 +1,8 @@
 This is the README file for A0135817B and A0147995H's submission
 
 Email address:
-Zhang Yijiang: e0011848@u.nus.edu
-Yang Zhuohan: e0012667@u.nus.edu
+e0011848@u.nus.edu
+e0012667@u.nus.edu
 
 == Python Version ==
 
@@ -10,37 +10,58 @@ We're using Python Version 2.7.14 for this assignment.
 
 == General Notes about this assignment ==
 
-Indexing:
-- Procedure:
-  1. for every training file, load the whole content into the system and tokenize into words
-  2. remove invalid characters of the tokenized word
-  3. if the word exists (meaning, not an empty string), add it into a set with the format (term, docId)
-  4. sort words accordingly and carefully merge the tuple with same term into a posting.
-  5. format postings and add skip pointers.
-  6. write postings into the posting file
-  7. write terms into dictionary file with offset to the corresponding postings.
+## Indexing:
 
-- Notes:
-  1. we choose not to use sentence tokenizer because we are handle invalid punctuation by keeping only 
+Procedure:
+
+  1. For every training file, load the whole content into the system and tokenize into words
+  2. Remove invalid characters of the tokenized word
+  3. Add the word into the posting list
+  4. Format postings and add skip pointers every sqrt(n) postings.
+  5. Write postings into the posting file
+  6. Write terms into dictionary file with offset to the corresponding postings.
+
+Notes:
+
+  1. We choose not to use sentence tokenizer because we are handle invalid punctuation by keeping only
      digits, alphabets, white spaces and dashes
-  2. we are using set to remove duplicated (term, id) pair
-  3. sorting procedure is to sort by doc id first and then terms.
-  4. the posting is in the format of: docId:pointer or docId (if there is a skip, add a digit which 
-     represents the index of the "next" docId)
-  5. we write a posting with all file names at the end of the posting file just for NOT operation
-  6. at the first line in the dictionary file we write the offset for all postings
+  2. We are using set to remove duplicated document IDs
+  3. the posting is in the format of `docId:pointer` if there is a skip pointer, or just `docId`
+     if there isn't. Postings are delimited by space
+  5. We write a posting with all file names at the end of the posting file just for NOT operation
+  6. At the first line in the dictionary file we write the offset for all postings
+
+Searching:
+ - The entire dictionary is read into memory
+ - The query is parsed into an AST using Dijkstra's Shunting-yard Algorithm. Some simple
+   optimization is applied, such as
+    - Removing NOT NOT (as these do not have any effect)
+    - Turning (NOT a OR NOT b) into NOT (a AND b), which is likely to be faster
+ - The AST is recursively "collapsed" as we walk down to each operation node and apply them
+    - At the leaf nodes, we retrieve the posting from the file. The posting is then cached
+      so that repeated queries against the same terms do not need to hit the file system
+    - For each of the operations, we use O(n) time algorithm to merge the child posting lists
+      to produce a new posting list
+ - These optimizations are applied to the merge algorithm for the AND operation
+    - Start with the shortest posting
+    - Use skip pointers if they are available
+    - When an AND NOT operation is detected, use set difference to improve computation performance
+ - NOT and OR operations are implemented relatively naively as we do not see any easy optimizations
+
 
 == Files included with this submission ==
 
-config.py - includes regex, enums and some constants that will be used in index.py and search.py.
-index.py  - indexing program that will be run to index all the training files.
-search.py - searching program that will be used to execute querys in a specific file and give output.
+config.py       - includes regex and some constants that will be used in index.py and search.py.
+index.py        - indexing program that will be run to index all the training files.
+search.py       - searching program that will be used to execute queries in a specific file and give output.
+dictionary.txt  - a dictionary mapping terms to their location in the postings file
+postings.txt    - includes document IDs for each term
 
 == Statement of individual work ==
 
 Please initial one of the following statements.
 
-[X] I, A0135817B and A0147995H, certify that I have followed the CS 3245 Information
+[X] We, A0135817B and A0147995H, certify that I have followed the CS 3245 Information
 Retrieval class guidelines for homework assignments.  In particular, I
 expressly vow that I have followed the Facebook rule in discussing
 with others in doing the assignment and did not take notes (digital or

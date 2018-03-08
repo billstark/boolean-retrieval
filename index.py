@@ -46,7 +46,7 @@ if input_directory is None or output_file_postings is None or output_file_dictio
 #      and fold case to lowercase.
 #    - word_tokenize is used because it performs better than our own algorithms, but
 #      it is too permissive as it lets many unwanted special characters through, so we
-#      separately sanitize it.
+#      separately sanitize it using our own regex.
 #    - A postings list is build in word_postings as { word: { doc_id, doc_id, ...} }.
 #      A set is used to deduplicate terms appearing multiple times in the same document.
 # 2. Posting list is written to postings.txt in alphabetical order with each posting appearing

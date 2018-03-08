@@ -13,6 +13,8 @@ def usage():
 
 
 class Postings:
+    """Class used to interact with the posting and dictionary files"""
+
     def __init__(self, postings_filename, dictionary_filename):
         self.stemmer = nltk.stem.PorterStemmer()
 
