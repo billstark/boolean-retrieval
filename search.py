@@ -28,18 +28,36 @@ class Node:
 
 
 class KeywordNode(Node):
-    def __init__(self, term, postings):
+    def __init__(self, term, postings=None):
         Node.__init__(self)
         self.term = term
-        self.children = postings
+        self._children = postings
+
+    @property
+    def children(self):
+        # Keyword node children are lazy loaded
+        if self._children is None:
+            self._children = get_posting(self.term)
+        return self._children
 
     def count(self):
         return len(self.children)
+
+    def __repr__(self):
+        return "(%s, %s)" % (self.term, self.count())
 
 
 class OperatorNode(Node):
     def collapsible(self):
         return all(map(lambda node: isinstance(node, KeywordNode), self.children))
+
+    def smallest_collapsible_child(self):
+        """Find the operator node in the """
+        if self.collapsible():
+            return self, self.count()
+
+        operator_children = filter(lambda node: isinstance(node, OperatorNode), self.children)
+        return min(map(lambda node: node.smallest_collapsible_child(), operator_children), key=lambda t: t[1])
 
 
 class AndNode(OperatorNode):
@@ -115,25 +133,6 @@ def get_posting(word):
     return parse_postings(int(dictionary[term][0]))
 
 
-# Adds skip pointers to a posting with the form [doc_id, doc_id, ...]
-# This would be useful when we are dealing with merging.
-def add_skip_pointers(temp_posting):
-    skip = int(math.sqrt(len(temp_posting)))
-    next_index = 0
-    return_posting = []
-
-    for index, doc_id in enumerate(temp_posting):
-        if index == next_index:
-            if index + skip >= len(temp_posting):
-                return_posting.append([doc_id, len(temp_posting) - 1])
-            else:
-                next_index = next_index + skip
-                return_posting.append([doc_id, next_index])
-        else:
-            return_posting.append([doc_id, index + 1])
-    return return_posting
-
-
 # Gets the next index of a specified posting list in AND operation.
 # e.g. we are operating on 1, 2, 3, 4 and
 #                          2, 3, 5, 6
@@ -166,7 +165,7 @@ def and_postings(posting_one, posting_two):
             results.append(posting_one[index_one][0])
             index_one = index_one + 1
             index_two = index_two + 1
-    return add_skip_pointers(results)
+    return results
 
 
 # similar to "AND" operation.
@@ -191,7 +190,7 @@ def or_postings(posting_one, posting_two):
             results.append(posting_one[index_one][0])
             index_one += 1
             index_two += 1
-    return add_skip_pointers(results)
+    return results
 
 
 # defines and_not operation
@@ -208,7 +207,7 @@ def and_not_postings(posting_one, posting_two):
         else:
             index_one += 1
             index_two += 1
-    return add_skip_pointers(results)
+    return results
 
 
 # defines not operation
@@ -333,6 +332,29 @@ def build_ast(query_terms):
 
     assert len(stack) == 1
     return stack[0]
+
+
+def optimize_ast(tree):
+    if isinstance(tree, KeywordNode):
+        return tree
+
+    # Remove NOT-NOT operations
+    if isinstance(tree, NotNode) and isinstance(tree.children[0], NotNode):
+        return optimize_ast(tree.children[0].children[0])
+
+    # Use De Morgan's law to change (NOT a OR NOT b) into NOT (a AND b)
+    if isinstance(tree, OrNode) and all(map(lambda node: isinstance(node, NotNode), tree.children)):
+        not_node = NotNode(all_posting)
+        and_node = AndNode()
+
+        not_node.add_child(and_node)
+
+        for child in tree.children:
+            and_node.add_child(optimize_ast(child.children[0]))
+        return not_node
+
+    tree.children = map(optimize_ast, tree.children)
+    return tree
 
 
 def run_query(query):
