@@ -4,10 +4,13 @@ import nltk
 import sys
 import getopt
 import math
+import os
 from config import *
+
 
 def usage():
     print "usage: " + sys.argv[0] + " -i directory-of-documents -d dictionary-file -p postings-file"
+
 
 input_directory = output_file_dictionary = output_file_postings = None
 
@@ -16,18 +19,18 @@ try:
 except getopt.GetoptError, err:
     usage()
     sys.exit(2)
-    
+
 for o, a in opts:
-    if o == '-i': # input directory
+    if o == '-i':  # input directory
         input_directory = a
-    elif o == '-d': # dictionary file
+    elif o == '-d':  # dictionary file
         output_file_dictionary = a
-    elif o == '-p': # postings file
+    elif o == '-p':  # postings file
         output_file_postings = a
     else:
         assert False, "unhandled option"
-        
-if input_directory == None or output_file_postings == None or output_file_dictionary == None:
+
+if input_directory is None or output_file_postings is None or output_file_dictionary is None:
     usage()
     sys.exit(2)
 
@@ -39,7 +42,7 @@ if input_directory == None or output_file_postings == None or output_file_dictio
 
 # It does the following things:
 # 1. read through all the training files and for each file, tokenize it and form terms
-#   1.1. using nltk sent_tokenize and word_tokenize to get words first, then use nltk stemmer
+#   1.1. using word_tokenize to get words first, then use nltk stemmer
 #       to stem the words. After that, fold the word to lower case
 #   1.2. stores a [word, index (doc_id)] pair into a `temp_list`
 #   Note: may have improvement since reading all files is not efficient
@@ -69,82 +72,68 @@ if input_directory == None or output_file_postings == None or output_file_dictio
 # create stemmer object
 ps = nltk.stem.PorterStemmer()
 
-# the temp list that is used to store [word, doc_id]
-temp_list = set()
+# words is a set of (word, document_id)
+words = set()
 all_doc_ids = []
 dictionary_file = open(output_file_dictionary, 'w')
 posting_file = open(output_file_postings, 'w')
 
 # for each file, try to read it
-for index in range(1, 14819):
-    input_file_name = input_directory + str(index)
-    print "trying to index file " + str(index) + "\n"
-    try:
-        input_file = open(input_file_name, 'r')
-        input_file_content = input_file.read()
+for doc_id in os.listdir(input_directory):
+    with open(os.path.join(input_directory, doc_id)) as input_file:
+        for word in nltk.word_tokenize(input_file.read()):
+            # Remove invalid characters (punctuations, special characters, etc.)
+            word = re.sub(INVALID_CHARS, "", word)
 
-        for sentence in nltk.sent_tokenize(input_file_content):
-            words = nltk.word_tokenize(sentence)
-            words = map(lambda word: re.sub(INVALID_CHARS, "", word), words)
-            words = filter(lambda word: word != "", words)
-            words = map(lambda word: ps.stem(word).lower(), words)
-            for word in words:
-                temp_list.add((word, index))
-        all_doc_ids.append(index)
-        input_file.close()
-    except IOError as e:
-        continue
+            if not word:
+                continue
 
-# sorts the temp dictionary
-temp_list = sorted(temp_list, key = lambda doc: doc[1])
-temp_list = sorted(temp_list, key = lambda doc: doc[0])
+            # Stem and lowercase the word
+            word = ps.stem(word.lower())
+            words.add((word, doc_id))
+
+        all_doc_ids.append(doc_id)
+
+# sorts the temp dictionary by document ID, then by word
+words = sorted(words, key=lambda t: t[1])
+words = sorted(words, key=lambda t: t[0])
 
 # create a dictionary and a word list to keep sequence
 processed_list = {}
 word_list = []
 
-for [word, doc_id] in temp_list:
+for word, doc_id in words:
     if word not in processed_list:
         word_list.append(word)
         processed_list[word] = {
             'posting': [doc_id]
         }
-        continue
-    processed_list[word]['posting'].append(doc_id)
+    else:
+        processed_list[word]['posting'].append(doc_id)
 
-# formating posting
+
 def get_posting_string(posting):
-
-    # calculates the skipping
+    # Calculates the number of index per skip
     skip = int(math.sqrt(len(posting)))
 
-    # keep track of the next index
+    # Keep track of the next skip pointer index
     next_index = 0
-    posting_list = ""
+    postings = []
 
     for index, doc_id in enumerate(posting):
-
-        # if the current index is the next index, we reach a skip point
+        # If the current index is the next index, we reach a skip point
         if index == next_index and index != len(posting) - 1:
-
-            # if the next skip point execeeds the total length, just
-            # let the next_index to be the last index
+            # If the next skip point exceeds the total length, just let the next_index to be the last index
             if index + skip >= len(posting):
-                posting_list = posting_list + str(doc_id) + ":" + str(len(posting) - 1) + " "
-                continue
+                next_index = len(posting) - 1
+            else:
+                next_index = index + skip
 
-            # else, specifies the next index to be current index + skip
-            next_index = next_index + skip
-            posting_list = posting_list + str(doc_id) + ":" + str(next_index) + " "
-            continue
+            postings.append("{}:{}".format(doc_id, next_index))
+        else:
+            postings.append(str(doc_id))
 
-        # else, not skipping point, next index is just current index + 1 (it it redundant actually)
-        # posting_list = posting_list + str(doc_id) + ":" + str(index + 1) + " "
-        posting_list = posting_list + str(doc_id) + " "
-
-    # add new line syntex, get length and add offset
-    posting_list = posting_list[:len(posting_list) - 1] + "\n"
-    return posting_list
+    return " ".join(postings) + "\n"
 
 
 # formating posting
@@ -158,7 +147,7 @@ for word in word_list:
     # writes into posting
     posting_file.write(posting_list)
 
-# This is to add all postings (a posting of all exisiting doc ids)
+# This is to add all postings (a posting of all existing doc ids)
 posting_file.write(get_posting_string(all_doc_ids))
 posting_file.close()
 
@@ -166,8 +155,6 @@ posting_file.close()
 # add this offset for the last posting (all postings)
 dictionary_file.write(str(offset) + "\n")
 for word in word_list:
-    dictionary_file.write(word + " " + str(processed_list[word]['offset']) + " " + str(len(processed_list[word]['posting'])) + "\n")
+    dictionary_file.write("{} {} {}\n".format(word, processed_list[word]['offset'], len(processed_list[word]['posting'])))
 
 dictionary_file.close()
-
-
