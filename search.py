@@ -5,6 +5,7 @@ import math
 import sys
 import getopt
 from config import *
+from operator import attrgetter, methodcaller
 
 
 def usage():
@@ -15,8 +16,133 @@ def create_term(token):
     return ps.stem(token).lower()
 
 
-# AST nodes
+def parse_postings(offset):
+    """
+    Returns the posting and skip pointers from a given offset in the postings file.
+    Posting is returned as a list of document IDs, and skip pointer as a dictionary of index to index"""
+    postings_file.seek(offset)
+    postings_string = postings_file.readline()
+    postings = []
+    skip_pointers = {}
+
+    for index, posting in enumerate(postings_string.split()):
+        # Postings may come with a skip pointer, eg. 123:12 where 123 is the usual docId, and 12 is a pointer
+        # to the 12th item in the list.
+        parsed_posting = posting.split(':')
+
+        if len(parsed_posting) == 2:
+            skip_pointers[index] = int(parsed_posting[1])
+
+        postings.append(int(parsed_posting[0]))
+
+    return postings, skip_pointers
+
+
+def get_posting(word):
+    """Return the posting and skip pointers for a specific word."""
+    term = create_term(word)
+    if term not in dictionary:
+        return [], {}
+    return parse_postings(int(dictionary[term][0]))
+
+
+# Gets the next index of a specified posting list in AND operation.
+# e.g. we are operating on 1, 2, 3, 4 and
+#                          2, 3, 5, 6
+# suppose current index is 0 and the other index is 3, we could move the current
+# index to 2 due to the skip pointer.
+def and_next_index(index, postings, other_id, skip_pointers):
+    if index in skip_pointers and postings[skip_pointers[index]] <= other_id:
+        while index in skip_pointers and postings[skip_pointers[index]] <= other_id:
+            index = skip_pointers[index]
+        return index
+
+    return index + 1
+
+
+def and_postings(posting_one, posting_two, skip_pointers_one, skip_pointers_two):
+    """
+    Returns the result of an AND (intersection) operation
+    ie. all posting in posting_one that match a posting in posting_two
+
+    Skip pointers can be provided to speed up the operation.
+    """
+    index_one = 0
+    index_two = 0
+    results = []
+
+    while index_one < len(posting_one) and index_two < len(posting_two):
+        if posting_one[index_one] < posting_two[index_two]:
+            index_one = and_next_index(index_one, posting_one, posting_two[index_two], skip_pointers_one)
+        elif posting_two[index_two] < posting_one[index_one]:
+            index_two = and_next_index(index_two, posting_two, posting_one[index_one], skip_pointers_two)
+        else:
+            results.append(posting_one[index_one])
+            index_one = index_one + 1
+            index_two = index_two + 1
+
+    return results
+
+
+def or_postings(posting_one, posting_two):
+    """
+    Returns the result of an OR operation (union)
+    ie. merge posting_one and posting_two without duplicates
+    """
+    index_one = 0
+    index_two = 0
+    results = []
+
+    while index_one < len(posting_one) and index_two < len(posting_two):
+        if posting_one[index_one] < posting_two[index_two]:
+            results.append(posting_one[index_one])
+            index_one += 1
+        elif posting_two[index_two] < posting_one[index_one]:
+            results.append(posting_two[index_two])
+            index_two += 1
+        else:
+            results.append(posting_one[index_one])
+            index_one += 1
+            index_two += 1
+
+    # Add in the leftover results
+    results.extend(posting_one[index_one:])
+    results.extend(posting_two[index_two:])
+
+    return results
+
+
+def and_not_postings(posting_one, posting_two):
+    """
+    Returns the result of an AND NOT (difference) operation
+    ie. all postings in posting_one excluding those in posting_two
+    """
+    index_one = 0
+    index_two = 0
+    results = []
+
+    while index_one < len(posting_one):
+        if index_two >= len(posting_two) or posting_one[index_one] < posting_two[index_two]:
+            results.append(posting_one[index_one])
+            index_one += 1
+        elif posting_two[index_two] < posting_one[index_one]:
+            index_two += 1
+        else:
+            index_one += 1
+            index_two += 1
+
+    return results
+
+
+# Return the result of a NOT operation
+# ie. all postings that is not in posting
+def not_postings(posting):
+    return and_not_postings(all_posting, posting)
+
+
+# AST nodes used for parsing and execution of boolean logic
 class Node:
+    """Abstract base class used for all nodes"""
     def __init__(self):
         self.children = []
 
@@ -26,38 +152,66 @@ class Node:
     def add_child(self, child):
         self.children.append(child)
 
+    def collapse(self):
+        """Collapse this node into a KeywordNode by executing the operation recursively"""
+        raise NotImplementedError()
+
 
 class KeywordNode(Node):
-    def __init__(self, term, postings=None):
+    """Represents a computed term with postings"""
+    def __init__(self, term, postings=None, skip_pointers=None):
         Node.__init__(self)
         self.term = term
-        self._children = postings
+        self._postings = postings
+
+        if skip_pointers is None:
+            self.skip_pointers = {}
+        else:
+            self.skip_pointers = skip_pointers
 
     @property
-    def children(self):
+    def postings(self):
         # Keyword node children are lazy loaded
-        if self._children is None:
-            self._children = get_posting(self.term)
-        return self._children
+        if self._postings is None:
+            self._postings, self.skip_pointers = get_posting(self.term)
+        return self._postings
 
     def count(self):
-        return len(self.children)
+        return len(self.postings)
+
+    def collapse(self):
+        return self
 
     def __repr__(self):
+        # For debugging
         return "(%s, %s)" % (self.term, self.count())
 
 
 class OperatorNode(Node):
-    def collapsible(self):
-        return all(map(lambda node: isinstance(node, KeywordNode), self.children))
+    pass
 
-    def smallest_collapsible_child(self):
-        """Find the operator node in the """
-        if self.collapsible():
-            return self, self.count()
 
-        operator_children = filter(lambda node: isinstance(node, OperatorNode), self.children)
-        return min(map(lambda node: node.smallest_collapsible_child(), operator_children), key=lambda t: t[1])
+class NotNode(OperatorNode):
+    def __init__(self):
+        Node.__init__(self)
+
+    @property
+    def child(self):
+        return self.children[0]
+
+    def add_child(self, child):
+        if self.children:
+            raise ValueError("NotNode already has child")
+
+        Node.add_child(self, child)
+
+    def count(self):
+        return len(all_posting) - self.child.count()
+
+    def collapse(self):
+        child = self.child.collapse()
+        term = 'NOT %s' % child.term
+        return KeywordNode(term, and_not_postings(all_posting, child.postings))
 
 
 class AndNode(OperatorNode):
@@ -70,17 +224,52 @@ class AndNode(OperatorNode):
             Node.add_child(self, child)
 
     def count(self):
-        return min(self.children, key=lambda n: n.count())
+        return min(self.children, key=methodcaller('count'))
 
-    def next_index(self, current_index, other_index, current_list, the_other_list):
-        if current_index >= len(current_list) - 1:
-            return current_index + 1
-        next_index = current_list[current_index][1]
-        if next_index >= len(current_list):
-            return current_index + 1
-        if current_list[next_index][0] < the_other_list[other_index][0]:
-            return next_index
-        return current_index + 1
+    def collapse(self):
+        terms = []
+
+        # Start with the child that has the smallest number of postings
+        first_node = min(self.children, key=methodcaller('count'))
+        self.children.remove(first_node)
+
+        first_node_collapsed = first_node.collapse()
+        postings = first_node_collapsed.postings
+        skip_pointers = first_node_collapsed.skip_pointers
+        terms.append(first_node_collapsed.term)
+
+        while self.children:
+            # Find the next smallest
+            next_node = min(self.children, key=self.child_count)
+            self.children.remove(next_node)
+
+            if self.can_use_and_not(next_node):
+                next_node_collapsed = next_node.child.collapse()
+                terms.append('NOT %s' % next_node_collapsed.term)
+
+                postings = and_not_postings(postings, next_node_collapsed.postings)
+            else:
+                next_node_collapsed = next_node.collapse()
+                terms.append(next_node_collapsed.term)
+
+                postings = and_postings(postings, next_node_collapsed.postings,
+                                        skip_pointers, next_node_collapsed.skip_pointers)
+
+            skip_pointers = {}
+
+        term = ' AND '.join(terms)
+        return KeywordNode(term, postings)
+
+    @staticmethod
+    def can_use_and_not(node):
+        # Check if we can use AND NOT optimization
+        return isinstance(node, NotNode) and node.child.count() < node.count()
+
+    @staticmethod
+    def child_count(node):
+        if AndNode.can_use_and_not(node):
+            return node.child.count()
+        return node.count()
 
 
 class OrNode(OperatorNode):
@@ -95,153 +284,12 @@ class OrNode(OperatorNode):
     def count(self):
         return sum(child.count() for child in self.children)
 
-
-class NotNode(OperatorNode):
-    def __init__(self, all_postings):
-        Node.__init__(self)
-        self.all_postings = all_postings
-
-    def add_child(self, child):
-        if self.children:
-            raise ValueError("NotNode already has child")
-
-        Node.add_child(self, child)
-
-    def count(self):
-        return len(self.all_postings) - self.children[0].count()
-
-
-# Finds the posting from a given offset.
-# returns the posting in the form of [[doc_id, position], [doc_id, position], ...]
-# The position here refers to the index of the next element (skip pointers included).
-def parse_postings(offset):
-    postings_file.seek(offset)
-    postings_string = postings_file.readline()
-    postings = map(lambda item:
-                   map(lambda num_string: int(num_string), item.split(":")),
-                   postings_string.split())
-    return postings
-
-
-# returns the posting according to a specific word.
-# returns the posting in the form of [[doc_id, position], [doc_id, position], ...]
-# The position here refers to the index of the next element (skip pointers included).
-def get_posting(word):
-    term = create_term(word)
-    if term not in dictionary:
-        return []
-    return parse_postings(int(dictionary[term][0]))
-
-
-# Gets the next index of a specified posting list in AND operation.
-# e.g. we are operating on 1, 2, 3, 4 and
-#                          2, 3, 5, 6
-# suppose current index is 0 and the other index is 3, we could move the current
-# index to 2 due to the skip pointer.
-def and_next_index(current_index, the_other_index, current_list, the_other_list):
-    if current_index >= len(current_list) - 1:
-        return current_index + 1
-    next_index = current_list[current_index][1]
-    if next_index >= len(current_list):
-        return current_index + 1
-    if current_list[next_index][0] < the_other_list[the_other_index][0]:
-        return next_index
-    return current_index + 1
-
-
-# Given two postings of the form [[doc_id, pointer], [doc_id, pointer], ...]
-# returns a posting that is the result of and "AND" operation
-# return format: [[doc_id, pointer], [doc_id, pointer], ...]
-def and_postings(posting_one, posting_two):
-    index_one = 0
-    index_two = 0
-    results = []
-    while index_one < len(posting_one) and index_two < len(posting_two):
-        if posting_one[index_one][0] < posting_two[index_two][0]:
-            index_one = and_next_index(index_one, index_two, posting_one, posting_two)
-        elif posting_two[index_two][0] < posting_one[index_one][0]:
-            index_two = and_next_index(index_two, index_one, posting_two, posting_one)
-        else:
-            results.append(posting_one[index_one][0])
-            index_one = index_one + 1
-            index_two = index_two + 1
-    return results
-
-
-# similar to "AND" operation.
-def or_postings(posting_one, posting_two):
-    index_one = 0
-    index_two = 0
-    results = []
-    while index_one < len(posting_one) or index_two < len(posting_two):
-        if index_one >= len(posting_one):
-            results.append(posting_two[index_two][0])
-            index_two += 1
-        elif index_two >= len(posting_two):
-            results.append(posting_one[index_one][0])
-            index_one += 1
-        elif posting_one[index_one][0] < posting_two[index_two][0]:
-            results.append(posting_one[index_one][0])
-            index_one += 1
-        elif posting_two[index_two][0] < posting_one[index_one][0]:
-            results.append(posting_two[index_two][0])
-            index_two += 1
-        else:
-            results.append(posting_one[index_one][0])
-            index_one += 1
-            index_two += 1
-    return results
-
-
-# defines and_not operation
-def and_not_postings(posting_one, posting_two):
-    index_one = 0
-    index_two = 0
-    results = []
-    while index_one < len(posting_one):
-        if index_two >= len(posting_two) or posting_one[index_one][0] < posting_two[index_two][0]:
-            results.append(posting_one[index_one][0])
-            index_one += 1
-        elif posting_two[index_two][0] < posting_one[index_one][0]:
-            index_two += 1
-        else:
-            index_one += 1
-            index_two += 1
-    return results
-
-
-# defines not operation
-def not_postings(posting):
-    return and_not_postings(all_posting, posting)
-
-
-# breaks the query according to the "AND", "OR" or "NOT" keyword.
-# input is a string of unparsed query
-# output is an array of breaked subquerys at the same level.
-# Note: This method is intended to solve the following case:
-# query: C OR (A OR B). We perhaps need to break the query to 
-# C and (A OR B) first.
-def break_with_keyword(query, keyword):
-    breaked = query.split(" " + keyword + " ")
-    parsed = []
-    index = 0
-    while index < len(breaked):
-        if '(' not in breaked[index] and ')' not in breaked[index]:
-            parsed.append(breaked[index])
-            index = index + 1
-            continue
-        if '(' in breaked[index]:
-            parenth = ""
-            while ')' not in breaked[index]:
-                parenth = parenth + breaked[index] + " " + keyword + " "
-                index = index + 1
-            parenth = parenth + breaked[index]
-            if parenth[0] == '(' and parenth[len(parenth) - 1] == ')':
-                parenth = parenth[1:len(parenth) - 1]
-            parsed.append(parenth)
-            index = index + 1
-            continue
-    return parsed
+    def collapse(self):
+        children = map(lambda node: node.collapse(), self.children)
+        posting = reduce(lambda posting, node: or_postings(posting, node.postings),
+                         children[1:], children[0].postings)
+        term = "(%s)" % ' OR '.join(map(attrgetter('term'), children))
+        return KeywordNode(term, posting)
 
 
 def tokenize_query(query):
@@ -288,7 +336,7 @@ def parse_query(query):
                 operator = stack[-1]
 
                 # ...we find an opening parenthesis, an operator with lower precedence,
-                # or if we're parsing an unary operator, a binary operator
+                #    or if we're parsing an unary operator, a binary operator
                 if operator == '(' \
                         or (token in UNARY_OPERATORS and operator not in UNARY_OPERATORS) \
                         or OPERATORS[operator] <= precedence:
@@ -313,14 +361,16 @@ def build_ast(query_terms):
         elif term == 'OR':
             terms.append(OrNode())
         elif term == 'NOT':
-            terms.append(NotNode(all_posting))
+            terms.append(NotNode())
         else:
-            terms.append(KeywordNode(term, get_posting(term)))
+            postings, skip_pointers = get_posting(term)
+            terms.append(KeywordNode(term, postings, skip_pointers))
 
     stack = []
     for term in terms:
         # Handle operators
-        if not isinstance(term, KeywordNode):
+        if isinstance(term, OperatorNode):
+            # NOT is the only unary operator
             if isinstance(term, NotNode):
                 term.add_child(stack.pop())
             else:
@@ -342,91 +392,19 @@ def optimize_ast(tree):
     if isinstance(tree, NotNode) and isinstance(tree.children[0], NotNode):
         return optimize_ast(tree.children[0].children[0])
 
-    # Use De Morgan's law to change (NOT a OR NOT b) into NOT (a AND b)
+    # Use De Morgan's law to change (NOT a OR NOT b) into NOT (a AND b), which is much cheaper
     if isinstance(tree, OrNode) and all(map(lambda node: isinstance(node, NotNode), tree.children)):
-        not_node = NotNode(all_posting)
+        not_node = NotNode()
         and_node = AndNode()
 
-        not_node.add_child(and_node)
-
         for child in tree.children:
-            and_node.add_child(optimize_ast(child.children[0]))
+            and_node.add_child(child.child)
+
+        not_node.add_child(optimize_ast(and_node))
         return not_node
 
     tree.children = map(optimize_ast, tree.children)
     return tree
-
-
-def run_query(query):
-    # at first, if it is wrapped with only one bracket, remove it.
-    if query[0] == '(' and query[len(query) - 1] == ')' and query.count('(') == 1 and query.count(')') == 1:
-        query = query[1:len(query) - 1]
-
-    # break with "OR" first, since OR is processed at last.
-    breaked_or = break_with_keyword(query, "OR")
-
-    # if nothing is breaked, which means that there is no OR operation, then we consider AND
-    if len(breaked_or) == 1:
-
-        # break with AND
-        breaked_and = break_with_keyword(query, "AND")
-
-        # NOTE: there is a flag, it: [[0 or 1, posting], [0 or 1, posting], ...]
-        # when the flag is set to 1, remember to toggle the posting when doing the 
-        # outer AND (I am using the flag because if the original posting is very large, 
-        # we can toggle it first and do NOT first, otherwise we should do "AND NOT")
-        term_postings = []
-
-        # for each keyword in the breaked and
-        for keyword in breaked_and:
-
-            # if there is not and not is not included in the bracket, parse it as NOT something.
-            if "NOT" in keyword and not (keyword[0] == '(' and keyword[len(keyword) - 1] == ')'):
-                keyword = keyword[4:]
-                posting = parse_query(keyword)
-                if len(posting) < len(all_posting) - len(posting):
-                    term_postings.append([1, posting])
-                    continue
-                term_postings.append([0, not_postings(posting)])
-                continue
-
-            # if there is bracket, pass it to parse query.
-            if " " in keyword:
-                term_postings.append([0, parse_query(keyword)])
-                continue
-
-            # else, there is only single-word left. get the posting of it
-            posting = get_posting(keyword)
-            if len(posting) == 0:
-                return []
-            term_postings.append([0, posting])
-
-        # sort all postings by length first
-        term_postings.sort(key=lambda x: len(x[1]))
-
-        result_and_postings = []
-
-        # check the first posting (see whether we need to toggle)
-        if term_postings[0][0] == 1:
-            result_and_postings = not_postings(term_postings[0][1])
-        else:
-            result_and_postings = term_postings[0][1]
-
-        # then operate AND on all the sub querys.
-        for index in range(1, len(term_postings)):
-            if term_postings[index][0] == 1:
-                result_and_postings = and_not_postings(result_and_postings, term_postings[index][1])
-                continue
-            result_and_postings = and_postings(result_and_postings, term_postings[index][1])
-        return result_and_postings
-
-    # else, which means that there are more than one sub queries for OR
-    # we process it one by one.
-    result_or_posting = []
-    for grouped_terms in breaked_or:
-        result_or_posting = or_postings(result_or_posting, parse_query(grouped_terms))
-
-    return result_or_posting
 
 
 dictionary_file = postings_file = file_of_queries = output_file_of_results = None
@@ -459,7 +437,7 @@ dictionary_file = open(dictionary_file)
 postings_file = open(postings_file)
 
 all_posting_offset = int(dictionary_file.readline())
-all_posting = parse_postings(all_posting_offset)
+all_posting, all_posting_skip_pointers = parse_postings(all_posting_offset)
 
 ps = nltk.stem.PorterStemmer()
 
@@ -472,13 +450,9 @@ for line in dictionary_file:
         pass
 
 for line in query_file:
-    if "\n" in line:
-        line = line[0:len(line) - 1]
-    temp_result = parse_query(line)
-    temp_result = map(lambda item: str(item[0]), temp_result)
+    query = parse_query(line.strip())
+    ast = optimize_ast(build_ast(query))
 
-    if len(temp_result) == 0:
-        output_file.write("\n")
-        continue
-    result_string = " ".join(temp_result)
+    result = ast.collapse()
+    result_string = " ".join(map(str, result.postings))
     output_file.write(result_string + "\n")
