@@ -12,38 +12,66 @@ def usage():
     print "usage: " + sys.argv[0] + " -d dictionary-file -p postings-file -q file-of-queries -o output-file-of-results"
 
 
-def create_term(token):
-    return ps.stem(token).lower()
+class Postings:
+    def __init__(self, postings_filename, dictionary_filename):
+        self.stemmer = nltk.stem.PorterStemmer()
 
+        self.postings_file = open(postings_filename)
+        # Cache parsed postings. If memory is tight, an LRU cache can be used instead.
+        self.parsed_postings = {}
 
-def parse_postings(offset):
-    """
-    Returns the posting and skip pointers from a given offset in the postings file.
-    Posting is returned as a list of document IDs, and skip pointer as a dictionary of index to index"""
-    postings_file.seek(offset)
-    postings_string = postings_file.readline()
-    postings = []
-    skip_pointers = {}
+        # Read in the dictionary file
+        self.dictionary = {}
 
-    for index, posting in enumerate(postings_string.split()):
-        # Postings may come with a skip pointer, eg. 123:12 where 123 is the usual docId, and 12 is a pointer
-        # to the 12th item in the list.
-        parsed_posting = posting.split(':')
+        with open(dictionary_filename) as dictionary_file:
+            all_posting_offset = int(dictionary_file.readline())
+            for line in dictionary_file:
+                try:
+                    term, offset, frequency = line.split()
+                    self.dictionary[term] = [int(offset), int(frequency)]
+                except ValueError:
+                    pass
 
-        if len(parsed_posting) == 2:
-            skip_pointers[index] = int(parsed_posting[1])
+        self.all_postings, _ = self.parse_postings(all_posting_offset, cache=False)
 
-        postings.append(int(parsed_posting[0]))
+    def parse_postings(self, offset, cache=True):
+        """
+        Returns the posting and skip pointers from a given offset in the postings file.
+        Posting is returned as a list of document IDs, and skip pointer as a dictionary of index to index
+        """
+        if cache and offset in self.parsed_postings:
+            return self.parsed_postings[offset]
 
-    return postings, skip_pointers
+        self.postings_file.seek(offset)
+        postings_string = self.postings_file.readline()
+        postings = []
+        skip_pointers = {}
 
+        for index, posting in enumerate(postings_string.split()):
+            # Postings may come with a skip pointer, eg. 123:12 where 123 is the usual document ID, and 12 is a pointer
+            # to the 12th item in the list.
+            parsed_posting = posting.split(':')
 
-def get_posting(word):
-    """Return the posting and skip pointers for a specific word."""
-    term = create_term(word)
-    if term not in dictionary:
-        return [], {}
-    return parse_postings(int(dictionary[term][0]))
+            if len(parsed_posting) == 2:
+                skip_pointers[index] = int(parsed_posting[1])
+
+            postings.append(int(parsed_posting[0]))
+
+        if cache:
+            self.parsed_postings[offset] = postings, skip_pointers
+
+        return postings, skip_pointers
+
+    def get_posting(self, word):
+        """
+        Return the posting and skip pointers for a specific word.
+        """
+        term = self.stemmer.stem(word.lower())
+        if term not in self.dictionary:
+            return [], {}
+
+        offset, frequency = self.dictionary[term]
+        return self.parse_postings(offset)
 
 
 # Gets the next index of a specified posting list in AND operation.
@@ -135,9 +163,9 @@ def and_not_postings(posting_one, posting_two):
 
 
 # Return the result of a NOT operation
-# ie. all postings that is not in posting
+# ie. all postings excluding the ones in posting
 def not_postings(posting):
-    return and_not_postings(all_posting, posting)
+    return and_not_postings(postings.all_postings, posting)
 
 
 # AST nodes used for parsing and execution of boolean logic
@@ -173,7 +201,7 @@ class KeywordNode(Node):
     def postings(self):
         # Keyword node children are lazy loaded
         if self._postings is None:
-            self._postings, self.skip_pointers = get_posting(self.term)
+            self._postings, self.skip_pointers = postings.get_posting(self.term)
         return self._postings
 
     def count(self):
@@ -206,12 +234,12 @@ class NotNode(OperatorNode):
         Node.add_child(self, child)
 
     def count(self):
-        return len(all_posting) - self.child.count()
+        return len(postings.all_postings) - self.child.count()
 
     def collapse(self):
         child = self.child.collapse()
         term = 'NOT %s' % child.term
-        return KeywordNode(term, and_not_postings(all_posting, child.postings))
+        return KeywordNode(term, and_not_postings(postings.all_postings, child.postings))
 
 
 class AndNode(OperatorNode):
@@ -234,31 +262,33 @@ class AndNode(OperatorNode):
         self.children.remove(first_node)
 
         first_node_collapsed = first_node.collapse()
-        postings = first_node_collapsed.postings
+        collapsed_postings = first_node_collapsed.postings
         skip_pointers = first_node_collapsed.skip_pointers
         terms.append(first_node_collapsed.term)
 
         while self.children:
-            # Find the next smallest
+            # Find the next smallest node to collapse
             next_node = min(self.children, key=self.child_count)
             self.children.remove(next_node)
 
             if self.can_use_and_not(next_node):
+                # If possible, use AND NOT (difference)
                 next_node_collapsed = next_node.child.collapse()
                 terms.append('NOT %s' % next_node_collapsed.term)
 
-                postings = and_not_postings(postings, next_node_collapsed.postings)
+                collapsed_postings = and_not_postings(collapsed_postings, next_node_collapsed.postings)
             else:
+                # Otherwise just use AND (intersection)
                 next_node_collapsed = next_node.collapse()
                 terms.append(next_node_collapsed.term)
 
-                postings = and_postings(postings, next_node_collapsed.postings,
-                                        skip_pointers, next_node_collapsed.skip_pointers)
+                collapsed_postings = and_postings(collapsed_postings, next_node_collapsed.postings,
+                                                  skip_pointers, next_node_collapsed.skip_pointers)
 
             skip_pointers = {}
 
         term = ' AND '.join(terms)
-        return KeywordNode(term, postings)
+        return KeywordNode(term, collapsed_postings)
 
     @staticmethod
     def can_use_and_not(node):
@@ -363,8 +393,8 @@ def build_ast(query_terms):
         elif term == 'NOT':
             terms.append(NotNode())
         else:
-            postings, skip_pointers = get_posting(term)
-            terms.append(KeywordNode(term, postings, skip_pointers))
+            term_postings, skip_pointers = postings.get_posting(term)
+            terms.append(KeywordNode(term, term_postings, skip_pointers))
 
     stack = []
     for term in terms:
@@ -392,7 +422,7 @@ def optimize_ast(tree):
     if isinstance(tree, NotNode) and isinstance(tree.children[0], NotNode):
         return optimize_ast(tree.children[0].children[0])
 
-    # Use De Morgan's law to change (NOT a OR NOT b) into NOT (a AND b), which is much cheaper
+    # Use De Morgan's law to change (NOT a OR NOT b) into NOT (a AND b), which is (usually) much cheaper
     if isinstance(tree, OrNode) and all(map(lambda node: isinstance(node, NotNode), tree.children)):
         not_node = NotNode()
         and_node = AndNode()
@@ -407,7 +437,7 @@ def optimize_ast(tree):
     return tree
 
 
-dictionary_file = postings_file = file_of_queries = output_file_of_results = None
+dictionary_file = postings_file = file_of_queries = file_of_output = None
 
 try:
     opts, args = getopt.getopt(sys.argv[1:], 'd:p:q:o:')
@@ -433,21 +463,8 @@ if dictionary_file is None or postings_file is None or file_of_queries is None o
 
 query_file = open(file_of_queries)
 output_file = open(file_of_output, 'w')
-dictionary_file = open(dictionary_file)
-postings_file = open(postings_file)
 
-all_posting_offset = int(dictionary_file.readline())
-all_posting, all_posting_skip_pointers = parse_postings(all_posting_offset)
-
-ps = nltk.stem.PorterStemmer()
-
-dictionary = {}
-for line in dictionary_file:
-    try:
-        term, offset, frequency = line.split()
-        dictionary[term] = [offset, frequency]
-    except ValueError:
-        pass
+postings = Postings(postings_file, dictionary_file)
 
 for line in query_file:
     query = parse_query(line.strip())
