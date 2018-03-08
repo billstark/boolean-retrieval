@@ -1,27 +1,24 @@
-This is the README file for A0000000X's submission
+This is the README file for A0135817B and A0147995H's submission
+
+Email address:
 
 == Python Version ==
 
-I'm (We're) using Python Version <2.7.x or replace version number> for
-this assignment.
+We're using Python Version 2.7.14 for this assignment.
 
 == General Notes about this assignment ==
 
-Give an overview of your program, describe the important algorithms/steps 
-in your program, and discuss your experiments in general.  A few paragraphs 
-are usually sufficient.
+For indexing, the
 
 == Files included with this submission ==
 
-List the files in your submission here and provide a short 1 line
-description of each file.  Make sure your submission's files are named
-and formatted correctly.
+config.py - includes
 
 == Statement of individual work ==
 
 Please initial one of the following statements.
 
-[ ] I, A0000000X, certify that I have followed the CS 3245 Information
+[X] I, A0135817B and A0147995H, certify that I have followed the CS 3245 Information
 Retrieval class guidelines for homework assignments.  In particular, I
 expressly vow that I have followed the Facebook rule in discussing
 with others in doing the assignment and did not take notes (digital or
@@ -38,5 +35,7 @@ I suggest that I should be graded as follows:
 
 == References ==
 
-<Please list any websites and/or people you consulted with for this
-assignment and state their role>
+- Shunting-yard algorithm: https://en.wikipedia.org/wiki/Shunting-yard_algorithm
+- The Shunting-Yard Algorithm - Nathan Reed's coding blog: http://reedbeta.com/blog/the-shunting-yard-algorithm/
+- Introduction to Information Retrieval
+  - Faster postings list intersection via skip pointers
