@@ -74,13 +74,11 @@ ps = nltk.stem.PorterStemmer()
 
 # words is a set of (word, document_id)
 words = set()
-all_doc_ids = []
-dictionary_file = open(output_file_dictionary, 'w')
-posting_file = open(output_file_postings, 'w')
+all_doc_ids = sorted(map(int, os.listdir(input_directory)))
 
 # for each file, try to read it
-for doc_id in os.listdir(input_directory):
-    with open(os.path.join(input_directory, doc_id)) as input_file:
+for doc_id in all_doc_ids:
+    with open(os.path.join(input_directory, str(doc_id))) as input_file:
         for word in nltk.word_tokenize(input_file.read()):
             # Remove invalid characters (punctuations, special characters, etc.)
             word = re.sub(INVALID_CHARS, "", word)
@@ -92,24 +90,22 @@ for doc_id in os.listdir(input_directory):
             word = ps.stem(word.lower())
             words.add((word, doc_id))
 
-        all_doc_ids.append(doc_id)
-
 # sorts the temp dictionary by document ID, then by word
 words = sorted(words, key=lambda t: t[1])
 words = sorted(words, key=lambda t: t[0])
 
 # create a dictionary and a word list to keep sequence
 processed_list = {}
-word_list = []
 
 for word, doc_id in words:
     if word not in processed_list:
-        word_list.append(word)
         processed_list[word] = {
             'posting': [doc_id]
         }
     else:
         processed_list[word]['posting'].append(doc_id)
+
+word_list = sorted(processed_list)
 
 
 def get_posting_string(posting):
@@ -118,7 +114,7 @@ def get_posting_string(posting):
 
     # Keep track of the next skip pointer index
     next_index = 0
-    postings = []
+    posting_strings = []
 
     for index, doc_id in enumerate(posting):
         # If the current index is the next index, we reach a skip point
@@ -129,32 +125,36 @@ def get_posting_string(posting):
             else:
                 next_index = index + skip
 
-            postings.append("{}:{}".format(doc_id, next_index))
+            posting_strings.append("{}:{}".format(doc_id, next_index))
         else:
-            postings.append(str(doc_id))
+            posting_strings.append(str(doc_id))
 
-    return " ".join(postings) + "\n"
+    return " ".join(posting_strings) + "\n"
 
 
 # formating posting
-offset = 0
-for word in word_list:
-    posting = processed_list[word]['posting']
-    posting_list = get_posting_string(posting)
-    processed_list[word]['offset'] = offset
-    offset = offset + len(posting_list)
+with open(output_file_postings, 'w') as posting_file:
+    # Keep track of the offset from the start of the file
+    offset = 0
 
-    # writes into posting
-    posting_file.write(posting_list)
+    for word in word_list:
+        posting = processed_list[word]['posting']
+        posting_list = get_posting_string(posting)
+        processed_list[word]['offset'] = offset
+        offset = offset + len(posting_list)
 
-# This is to add all postings (a posting of all existing doc ids)
-posting_file.write(get_posting_string(all_doc_ids))
-posting_file.close()
+        # writes into posting
+        posting_file.write(posting_list)
+
+    # This is to add all postings (a posting of all existing doc ids)
+    posting_file.write(get_posting_string(sorted(all_doc_ids)))
+    posting_file.close()
 
 # writes into dictionary
 # add this offset for the last posting (all postings)
-dictionary_file.write(str(offset) + "\n")
-for word in word_list:
-    dictionary_file.write("{} {} {}\n".format(word, processed_list[word]['offset'], len(processed_list[word]['posting'])))
+with open(output_file_dictionary, 'w') as dictionary_file:
+    dictionary_file.write(str(offset) + "\n")
+    for word in word_list:
+        dictionary_file.write("{} {} {}\n".format(word, processed_list[word]['offset'], len(processed_list[word]['posting'])))
 
-dictionary_file.close()
+    dictionary_file.close()
