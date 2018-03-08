@@ -9,3 +9,4 @@ OPERATORS = {
     '(': 4,
     ')': 4,
 }
+UNARY_OPERATORS = {'NOT'}

@@ -4,7 +4,6 @@ import nltk
 import math
 import sys
 import getopt
-
 from config import *
 
 
@@ -14,6 +13,84 @@ def usage():
 
 def create_term(token):
     return ps.stem(token).lower()
+
+
+# AST nodes
+class Node:
+    def __init__(self):
+        self.children = []
+
+    def count(self):
+        raise NotImplementedError()
+
+    def add_child(self, child):
+        self.children.append(child)
+
+
+class KeywordNode(Node):
+    def __init__(self, term, postings):
+        Node.__init__(self)
+        self.term = term
+        self.children = postings
+
+    def count(self):
+        return len(self.children)
+
+
+class OperatorNode(Node):
+    def collapsible(self):
+        return all(map(lambda node: isinstance(node, KeywordNode), self.children))
+
+
+class AndNode(OperatorNode):
+    def add_child(self, child):
+        # Flatten AND node
+        if isinstance(child, AndNode):
+            for subchild in child.children:
+                self.add_child(subchild)
+        else:
+            Node.add_child(self, child)
+
+    def count(self):
+        return min(self.children, key=lambda n: n.count())
+
+    def next_index(self, current_index, other_index, current_list, the_other_list):
+        if current_index >= len(current_list) - 1:
+            return current_index + 1
+        next_index = current_list[current_index][1]
+        if next_index >= len(current_list):
+            return current_index + 1
+        if current_list[next_index][0] < the_other_list[other_index][0]:
+            return next_index
+        return current_index + 1
+
+
+class OrNode(OperatorNode):
+    def add_child(self, child):
+        # Flatten OR node
+        if isinstance(child, OrNode):
+            for subchild in child.children:
+                self.add_child(subchild)
+        else:
+            Node.add_child(self, child)
+
+    def count(self):
+        return sum(child.count() for child in self.children)
+
+
+class NotNode(OperatorNode):
+    def __init__(self, all_postings):
+        Node.__init__(self)
+        self.all_postings = all_postings
+
+    def add_child(self, child):
+        if self.children:
+            raise ValueError("NotNode already has child")
+
+        Node.add_child(self, child)
+
+    def count(self):
+        return len(self.all_postings) - self.children[0].count()
 
 
 # Finds the posting from a given offset.
@@ -168,27 +245,8 @@ def break_with_keyword(query, keyword):
     return parsed
 
 
-# Pop a stack until predicate is True, returning all popped items including the one that
-# matched True
-def pop_until(stack, predicate):
-    try:
-        next_item = stack.pop()
-    except IndexError:
-        return []
-
-    popped = [next_item]
-    while not predicate(next_item):
-        try:
-            next_item = stack.pop()
-        except IndexError:
-            return popped
-
-        popped.append(next_item)
-    return popped
-
-
-# Parses the query.
 def tokenize_query(query):
+    """Remove all invalid characters and return query as a list of keyword and operator tokens"""
     # Remove invalid chars
     query = re.sub(INVALID_QUERY_CHARS, ' ', query)
     # Add a whitespace around each ( and ) chars to aid tokenization
@@ -209,27 +267,72 @@ def parse_query(query):
 
     while tokens:
         token = tokens.pop()
+        # Keyword
         if token not in OPERATORS:
-            output.append(token)
+            output.append(token.lower())
+        # Open parenthesis
         elif token == '(':
             stack.append(token)
+        # Close parenthesis
         elif token == ')':
             # Slice [:-1] to drop the matching parenthesis
-            output.extend(pop_until(stack, lambda t: t == '(')[:-1])
+            operator = stack.pop()
+            while operator != '(':
+                output.append(operator)
+                operator = stack.pop()
+        # All other operators
         else:
             precedence = OPERATORS[token]
-            output.extend(pop_until(stack, lambda t: t == '(' or OPERATORS[t] <= precedence))
 
-            # Handle '(' being accidentally popped out of output
-            if output[-1] == '(':
-                stack.append(output.pop())
+            while stack:
+                # Pop operators until...
+                operator = stack[-1]
+
+                # ...we find an opening parenthesis, an operator with lower precedence,
+                # or if we're parsing an unary operator, a binary operator
+                if operator == '(' \
+                        or (token in UNARY_OPERATORS and operator not in UNARY_OPERATORS) \
+                        or OPERATORS[operator] <= precedence:
+                    break
+
+                output.append(stack.pop())
 
             stack.append(token)
-        print(token, output, stack)
 
+    # Append leftover operations
     output.extend(reversed(stack))
 
     return output
+
+
+def build_ast(query_terms):
+    # Preprocess queries by replacing all keywords with keyword nodes
+    terms = []
+    for term in query_terms:
+        if term == 'AND':
+            terms.append(AndNode())
+        elif term == 'OR':
+            terms.append(OrNode())
+        elif term == 'NOT':
+            terms.append(NotNode(all_posting))
+        else:
+            terms.append(KeywordNode(term, get_posting(term)))
+
+    stack = []
+    for term in terms:
+        # Handle operators
+        if not isinstance(term, KeywordNode):
+            if isinstance(term, NotNode):
+                term.add_child(stack.pop())
+            else:
+                term.add_child(stack.pop())
+                term.add_child(stack.pop())
+
+        # Push back into stack
+        stack.append(term)
+
+    assert len(stack) == 1
+    return stack[0]
 
 
 def run_query(query):
@@ -340,10 +443,11 @@ ps = nltk.stem.PorterStemmer()
 
 dictionary = {}
 for line in dictionary_file:
-    data_array = line.split()
-    if len(data_array) != 3:
-        continue
-    dictionary[data_array[0]] = [data_array[1], data_array[2]]
+    try:
+        term, offset, frequency = line.split()
+        dictionary[term] = [offset, frequency]
+    except ValueError:
+        pass
 
 for line in query_file:
     if "\n" in line:
