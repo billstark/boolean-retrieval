@@ -125,7 +125,7 @@ def get_posting_string(posting):
     for index, doc_id in enumerate(posting):
 
         # if the current index is the next index, we reach a skip point
-        if index == next_index:
+        if index == next_index and index != len(posting) - 1:
 
             # if the next skip point execeeds the total length, just
             # let the next_index to be the last index
@@ -139,7 +139,8 @@ def get_posting_string(posting):
             continue
 
         # else, not skipping point, next index is just current index + 1 (it it redundant actually)
-        posting_list = posting_list + str(doc_id) + ":" + str(index + 1) + " "
+        # posting_list = posting_list + str(doc_id) + ":" + str(index + 1) + " "
+        posting_list = posting_list + str(doc_id) + " "
 
     # add new line syntex, get length and add offset
     posting_list = posting_list[:len(posting_list) - 1] + "\n"
