@@ -4,6 +4,7 @@ import nltk
 import sys
 import getopt
 import math
+from config import *
 
 def usage():
     print "usage: " + sys.argv[0] + " -i directory-of-documents -d dictionary-file -p postings-file"
@@ -69,7 +70,7 @@ if input_directory == None or output_file_postings == None or output_file_dictio
 ps = nltk.stem.PorterStemmer()
 
 # the temp list that is used to store [word, doc_id]
-temp_list = []
+temp_list = set()
 all_doc_ids = []
 dictionary_file = open(output_file_dictionary, 'w')
 posting_file = open(output_file_postings, 'w')
@@ -83,19 +84,20 @@ for index in range(1, 14819):
         input_file_content = input_file.read()
 
         for sentence in nltk.sent_tokenize(input_file_content):
-            words = map(lambda word: ps.stem(word).lower(), nltk.word_tokenize(sentence))
+            words = nltk.word_tokenize(sentence)
+            words = map(lambda word: re.sub(INVALID_CHARS, "", word), words)
+            words = filter(lambda word: word != "", words)
+            words = map(lambda word: ps.stem(word).lower(), words)
             for word in words:
-                if [word, index] in temp_list:
-                    continue
-                temp_list.append([word, index])
+                temp_list.add((word, index))
         all_doc_ids.append(index)
         input_file.close()
     except IOError as e:
         continue
 
 # sorts the temp dictionary
-temp_list.sort(key = lambda doc: doc[1])
-temp_list.sort(key = lambda doc: doc[0])
+temp_list = sorted(temp_list, key = lambda doc: doc[1])
+temp_list = sorted(temp_list, key = lambda doc: doc[0])
 
 # create a dictionary and a word list to keep sequence
 processed_list = {}
@@ -110,6 +112,7 @@ for [word, doc_id] in temp_list:
         continue
     processed_list[word]['posting'].append(doc_id)
 
+# formating posting
 def get_posting_string(posting):
 
     # calculates the skipping
@@ -122,7 +125,7 @@ def get_posting_string(posting):
     for index, doc_id in enumerate(posting):
 
         # if the current index is the next index, we reach a skip point
-        if index == next_index:
+        if index == next_index and index != len(posting) - 1:
 
             # if the next skip point execeeds the total length, just
             # let the next_index to be the last index
@@ -136,7 +139,8 @@ def get_posting_string(posting):
             continue
 
         # else, not skipping point, next index is just current index + 1 (it it redundant actually)
-        posting_list = posting_list + str(doc_id) + ":" + str(index + 1) + " "
+        # posting_list = posting_list + str(doc_id) + ":" + str(index + 1) + " "
+        posting_list = posting_list + str(doc_id) + " "
 
     # add new line syntex, get length and add offset
     posting_list = posting_list[:len(posting_list) - 1] + "\n"
@@ -154,11 +158,13 @@ for word in word_list:
     # writes into posting
     posting_file.write(posting_list)
 
+# This is to add all postings (a posting of all exisiting doc ids)
 posting_file.write(get_posting_string(all_doc_ids))
 posting_file.close()
 
 # writes into dictionary
-dictionary_file.write(offset)
+# add this offset for the last posting (all postings)
+dictionary_file.write(str(offset) + "\n")
 for word in word_list:
     dictionary_file.write(word + " " + str(processed_list[word]['offset']) + " " + str(len(processed_list[word]['posting'])) + "\n")
 
