@@ -6,7 +6,7 @@ import getopt
 import math
 import os
 from config import *
-
+from collections import defaultdict
 
 def usage():
     print "usage: " + sys.argv[0] + " -i directory-of-documents -d dictionary-file -p postings-file"
@@ -38,48 +38,40 @@ if input_directory is None or output_file_postings is None or output_file_dictio
 # Implementation overview: #
 ############################
 
-# This implementation for indexing is not efficient at all.
-
 # It does the following things:
-# 1. read through all the training files and for each file, tokenize it and form terms
-#   1.1. using word_tokenize to get words first, then use nltk stemmer
-#       to stem the words. After that, fold the word to lower case
-#   1.2. stores a [word, index (doc_id)] pair into a `temp_list`
-#   Note: may have improvement since reading all files is not efficient
-# 2. sort the `temp_list` by doc_id
-# 3. sort the `temp_list` by word
-#   Note: after this step the `temp_list` will be ordered by word in alphabetical order
-#       and for each word, they will be ordered by doc_id
-# 4. zips the `temp_list` into a dictionary that is of the following format (`processed_list`)
-#       {
-#           'word': { 'posting': [doc_id, doc_id, doc_id] }
-#       }
-#   Note: at the same time, keep a `word_list` that is used to keep word ordering
-# 5. creates the posting. With the order in `word_list`, stores the posing in the following
-#   format: "doc_id:next_index doc_id:next_index doc_id:next_index"
-#   Note: next_id is used for skip pointers. we could later read each line and store them into
-#       [[doc_id, next_index], [doc_id, next_index], ...], then next_index will give a skip
-#       pointer to the "next" array element. For non-skipping ones, next_index is just current
-#       index + 1
-#   Note: at the same time, get the line length and keep an offset for the use of seek()
-#       store the offset into the dictionary and the format of `processed_list` becomes
-#       {
-#           'word': { 'posting': [doc_id, doc_id, ...], 'offset': offset }    
-#       }
-# 6. stores the dictionary with the following format:
-#       "word offset count"
+#
+# 1. Read through all the training files and for each file, tokenize it to form terms
+#    - We use word_tokenize to get words first, then sanitize it using our own regex
+#      which removes most special characters, then use nltk stemmer to stem the words
+#      and fold case to lowercase.
+#    - word_tokenize is used because it performs better than our own algorithms, but
+#      it is too permissive as it lets many unwanted special characters through, so we
+#      separately sanitize it.
+#    - A postings list is build in word_postings as { word: { doc_id, doc_id, ...} }.
+#      A set is used to deduplicate terms appearing multiple times in the same document.
+# 2. Posting list is written to postings.txt in alphabetical order with each posting appearing
+#    on its own line, and each document ID delimited by spaces.
+#    - Skip pointers are inserted after every sqrt(n) posting. They appear as 'doc_id:pointer',
+#      with the pointer pointing towards the index of the skip index
+#    - As the list is written the offset for each term appearing in the document is stored
+#      in word_offsets
+# 3. The dictionary file is written to dictionary.txt, with each term appearing alphabetically
+#    on their own line. The format is 'term offset frequency'.
 
-# create stemmer object
+
+# Create stemmer object
 ps = nltk.stem.PorterStemmer()
 
 # words is a set of (word, document_id)
-words = set()
+word_postings = defaultdict(set)
+
 all_doc_ids = sorted(map(int, os.listdir(input_directory)))
 
-# for each file, try to read it
 for doc_id in all_doc_ids:
-    with open(os.path.join(input_directory, str(doc_id))) as input_file:
-        for word in nltk.word_tokenize(input_file.read()):
+    filepath = os.path.join(input_directory, str(doc_id))
+    with open(filepath) as input_file:
+        document_content = input_file.read()
+        for word in nltk.word_tokenize(document_content):
             # Remove invalid characters (punctuations, special characters, etc.)
             word = re.sub(INVALID_CHARS, "", word)
 
@@ -88,27 +80,13 @@ for doc_id in all_doc_ids:
 
             # Stem and lowercase the word
             word = ps.stem(word.lower())
-            words.add((word, doc_id))
-
-# sorts the temp dictionary by document ID, then by word
-words = sorted(words, key=lambda t: t[1])
-words = sorted(words, key=lambda t: t[0])
-
-# create a dictionary and a word list to keep sequence
-processed_list = {}
-
-for word, doc_id in words:
-    if word not in processed_list:
-        processed_list[word] = {
-            'posting': [doc_id]
-        }
-    else:
-        processed_list[word]['posting'].append(doc_id)
-
-word_list = sorted(processed_list)
+            word_postings[word].add(doc_id)
 
 
-def get_posting_string(posting):
+def format_posting_list(posting):
+    # Ensure the document IDs are sorted
+    posting = sorted(posting)
+
     # Calculates the number of index per skip
     skip = int(math.sqrt(len(posting)))
 
@@ -132,29 +110,32 @@ def get_posting_string(posting):
     return " ".join(posting_strings) + "\n"
 
 
-# formating posting
+# Sort the words so that they appear in the dictionary in alphabetical order
+word_list = sorted(word_postings)
+word_offsets = {}
+
 with open(output_file_postings, 'w') as posting_file:
     # Keep track of the offset from the start of the file
     offset = 0
 
     for word in word_list:
-        posting = processed_list[word]['posting']
-        posting_list = get_posting_string(posting)
-        processed_list[word]['offset'] = offset
-        offset = offset + len(posting_list)
+        posting_list = format_posting_list(word_postings[word])
+        word_offsets[word] = offset
+        offset += len(posting_list)
 
         # writes into posting
         posting_file.write(posting_list)
 
     # This is to add all postings (a posting of all existing doc ids)
-    posting_file.write(get_posting_string(sorted(all_doc_ids)))
+    posting_file.write(format_posting_list(all_doc_ids))
     posting_file.close()
 
 # writes into dictionary
 # add this offset for the last posting (all postings)
 with open(output_file_dictionary, 'w') as dictionary_file:
     dictionary_file.write(str(offset) + "\n")
+
     for word in word_list:
-        dictionary_file.write("{} {} {}\n".format(word, processed_list[word]['offset'], len(processed_list[word]['posting'])))
+        dictionary_file.write("{} {} {}\n".format(word, word_offsets[word], len(word_postings[word])))
 
     dictionary_file.close()
